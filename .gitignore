@@ -1,0 +1,4 @@
+.DS_Store
+chip-8/chip-8
+*.o
+*.dSYM/

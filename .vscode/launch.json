@@ -1,0 +1,18 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Chip-8 (LLDB)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/chip-8/chip-8",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/chip-8",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "preLaunchTask": "Build Chip-8"
+        }
+    ]
+}
