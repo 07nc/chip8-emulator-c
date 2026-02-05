@@ -35,20 +35,20 @@ typedef struct{
     uint8_t displayTimer; 
     uint8_t soundTimer;  
     bool keypad[16]; //Hex keypad 0x0-0xF
-    char* rom_name; //current ROM file name
+    const char* rom_name; //current ROM file name
 }chip8_t;
 
 //set initial configuration
 bool set_config(config_t*config,int argc,char**argv){
     config->window_height=32;
     config->window_width=64;
-    config->bgcolor=0xFF00FFFF;
+    config->bgcolor=0x00000000;
     config->fgcolor=0x00000000;
     config->scale=20;
     (void)argc;
     (void)argv;
     return true;
-}
+} 
 
 //initialise SDL
 bool init_sdl(sdl_t*sdl,const config_t config){
@@ -87,7 +87,7 @@ void update_screen(sdl_t*sdl){
     SDL_RenderPresent(sdl->renderer);
 }
 
-bool init_chip8(chip8_t*chip8,char rom_name[]){
+bool init_chip8(chip8_t*chip8, const char rom_name[]){
     uint8_t font[] =
     {
         0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
@@ -107,13 +107,32 @@ bool init_chip8(chip8_t*chip8,char rom_name[]){
         0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
         0xF0, 0x80, 0xF0, 0x80, 0x80  // F
     };
+    const uint32_t rom_start=0x200;
     //load font into RAM
     memcpy(&chip8->ram[0],font,sizeof(font));
     //open ROM file
+    FILE*rom=fopen(rom_name,"rb");
+    if(!rom){
+        SDL_Log("ROM File %s is invalid or doesn't exist \n",rom_name);
+        return false;
+    }
+    //get ROM size
+    fseek(rom,0,SEEK_END);
+    const size_t rom_size=ftell(rom);
+    rewind(rom);
+    if(rom_size>sizeof chip8->ram-rom_start){
+        SDL_Log("ROM File size exceeds max size allowed\n");
+        return false;
+    }
+    if(fread(&chip8->ram[rom_start],rom_size,1,rom)!=1){
+        SDL_Log("Could not load ROM File to memory %s \n",rom_name);
+        return false;
+    }
+    fclose(rom);
     //set defaults
     chip8->state=RUNNING;
-    chip8->PC=0x200; //ROM starts at 0x200
-
+    chip8->PC=rom_start; //Program Counter points to where ROM begins
+    chip8->rom_name=rom_name;
     return true;
 }
 
@@ -137,6 +156,13 @@ void handle_input(chip8_t* chip8){
                     case SDLK_ESCAPE:
                         chip8->state=QUIT;
                         return;
+                    case SDLK_SPACE:
+                        if(chip8->state==RUNNING){
+                        chip8->state=PAUSED;
+                        puts("PAUSED");
+                        }
+                        else chip8->state=RUNNING;
+                        return;
                     default:
                         break;
                 }
@@ -146,6 +172,10 @@ void handle_input(chip8_t* chip8){
     }
 }
 int main(int argc,char**argv){
+    if(argc<2){
+        fprintf(stderr,"Usage: %s <rom_name>\n",argv[0]);
+        exit(EXIT_FAILURE);
+    }
     sdl_t sdl={0};
     config_t config={0};
     if(!set_config(&config,argc,argv)){exit(EXIT_FAILURE);}
@@ -156,14 +186,16 @@ int main(int argc,char**argv){
     }
     //initial screen clear
     clear_screen(&sdl,config);
+    const char* rom_name=argv[1];
     //initialise chip8 
-    init_chip8(&chip8,argv[1]);
-    if(!init_chip8(&chip8,argv[1])){
+    if(!init_chip8(&chip8,rom_name)){
         exit(EXIT_FAILURE);
     }
-    
     while(chip8.state!=QUIT){
+        //handle user input 
         handle_input(&chip8);
+        //pause emulation
+        if(chip8.state==PAUSED){continue;}
         SDL_Delay(16);
         clear_screen(&sdl,config);
         update_screen(&sdl);
