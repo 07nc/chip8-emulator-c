@@ -23,6 +23,18 @@ typedef enum{
     RUNNING,
     PAUSED,
 }state_t;
+
+//CHIP-8 instruction
+typedef struct{
+    uint16_t opcode; //2 byte opcode
+    uint16_t NNN; //2 byte address/constant
+    uint8_t NN; //8 bit constant
+    uint8_t N; //4 bit constant
+    uint8_t X; //4 bit register identifier 
+    uint8_t Y; //4 bit register identifier
+
+}instruction_t;
+
 //CHIP-8 machine object
 typedef struct{
     state_t state;
@@ -36,6 +48,7 @@ typedef struct{
     uint8_t soundTimer;  
     bool keypad[16]; //Hex keypad 0x0-0xF
     const char* rom_name; //current ROM file name
+    instruction_t instruction; //current instruction
 }chip8_t;
 
 //set initial configuration
@@ -171,6 +184,19 @@ void handle_input(chip8_t* chip8){
         }
     }
 }
+
+void emulate_instruction(chip8_t*chip8){
+    //get the next opcode from RAM 
+    //RAM is an array of 8 bits
+    //read the first 8 bits, left shift by 8 then OR with next 8 bits
+    chip8->instruction.opcode=chip8->ram[chip8->PC]<<8 | chip8->ram[chip8->PC+1];
+    //each instruction is 2 bytes so increment the program counter by 2
+    chip8->PC+=2;
+    if(chip8->instruction.opcode==0x0000){
+        chip8->state=QUIT;
+    }
+}
+
 int main(int argc,char**argv){
     if(argc<2){
         fprintf(stderr,"Usage: %s <rom_name>\n",argv[0]);
@@ -196,6 +222,9 @@ int main(int argc,char**argv){
         handle_input(&chip8);
         //pause emulation
         if(chip8.state==PAUSED){continue;}
+        //emulate instructions
+        emulate_instruction(&chip8);    
+        printf("%04X\n",chip8.instruction.opcode);
         SDL_Delay(16);
         clear_screen(&sdl,config);
         update_screen(&sdl);
