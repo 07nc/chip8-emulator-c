@@ -44,6 +44,7 @@ typedef struct{
     uint8_t V[16]; //data registers from V0-VF
     uint16_t I; //index register
     uint16_t PC; //program counter register
+    uint16_t* SP; //stack pointer
     uint8_t displayTimer; 
     uint8_t soundTimer;  
     bool keypad[16]; //Hex keypad 0x0-0xF
@@ -56,8 +57,8 @@ bool set_config(config_t*config,int argc,char**argv){
     config->window_height=32;
     config->window_width=64;
     config->bgcolor=0x00000000;
-    config->fgcolor=0x00000000;
-    config->scale=20;
+    config->fgcolor=0xFFFFFFFF;
+    config->scale=10;
     (void)argc;
     (void)argv;
     return true;
@@ -71,7 +72,7 @@ bool init_sdl(sdl_t*sdl,const config_t config){
     }
     //create window
     sdl->window=SDL_CreateWindow("CHIP-8 Emulator",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,
-        config.window_width*config.scale,config.window_height*config.scale,SDL_WINDOW_ALLOW_HIGHDPI);
+        config.window_width*config.scale,config.window_height*config.scale,0);
     if(!sdl->window){
         SDL_Log("SDL Window couldn't be created %s\n",SDL_GetError());
         return false;
@@ -82,22 +83,54 @@ bool init_sdl(sdl_t*sdl,const config_t config){
         SDL_Log("SDL Renderer couldn't be created %s\n",SDL_GetError());
         return false;
     }
+
     return true;
 }
 
 //clear screen to background color
-void clear_screen(sdl_t *sdl,const config_t config){
-    const uint8_t r=(config.bgcolor>>24)&0xFF;
-    const uint8_t g=(config.bgcolor>>16)&0xFF;
-    const uint8_t b=(config.bgcolor>>8)&0xFF;
-    const uint8_t a=(config.bgcolor)&0xFF;
+void clear_screen(sdl_t *sdl,const config_t *config){
+    const uint8_t r=(config->bgcolor>>24)&0xFF;
+    const uint8_t g=(config->bgcolor>>16)&0xFF;
+    const uint8_t b=(config->bgcolor>>8)&0xFF;
+    const uint8_t a=(config->bgcolor)&0xFF;
     SDL_SetRenderDrawColor(sdl->renderer,r,g,b,a);
     SDL_RenderClear(sdl->renderer);
 }
 
 //update screen
-void update_screen(sdl_t*sdl){
+void update_screen(const sdl_t*sdl, const chip8_t*chip8, const config_t*config){
+    SDL_Rect rect={.x=0,.y=0,.h=config->scale,.w=config->scale};
+
+    //intialise rgba values from config bgcolor and fgcolor
+    const uint8_t bg_r=(config->bgcolor>>24)&0xFF;
+    const uint8_t bg_g=(config->bgcolor>>16)&0xFF;
+    const uint8_t bg_b=(config->bgcolor>>8)&0xFF;
+    const uint8_t bg_a=(config->bgcolor)&0xFF;
+
+    const uint8_t fg_r=(config->fgcolor>>24)&0xFF;
+    const uint8_t fg_g=(config->fgcolor>>16)&0xFF;
+    const uint8_t fg_b=(config->fgcolor>>8)&0xFF;
+    const uint8_t fg_a=(config->fgcolor)&0xFF;
+
+    //loop through display array and draw filled rectangles if pixel is set to 1
+    for(uint32_t i=0;i<sizeof(chip8->display);i++){
+        //y = i/window_width
+        //x = i%window_width
+        rect.y=(i/config->window_width)*config->scale;
+        rect.x=(i%config->window_width)*config->scale;
+        if(chip8->display[i]){
+            //if pixel is on, draw rect with foreground color
+            SDL_SetRenderDrawColor(sdl->renderer,fg_r,fg_g,fg_b,fg_a);
+            SDL_RenderFillRect(sdl->renderer,&rect);
+        } else{
+            //if pixel is off, draw rect with background color
+            SDL_SetRenderDrawColor(sdl->renderer,bg_r,bg_g,bg_b,bg_a);
+            SDL_RenderFillRect(sdl->renderer,&rect);
+        }
+    }
+
     SDL_RenderPresent(sdl->renderer);
+
 }
 
 bool init_chip8(chip8_t*chip8, const char rom_name[]){
@@ -146,6 +179,7 @@ bool init_chip8(chip8_t*chip8, const char rom_name[]){
     chip8->state=RUNNING;
     chip8->PC=rom_start; //Program Counter points to where ROM begins
     chip8->rom_name=rom_name;
+    chip8->SP=&chip8->stack[0]; 
     return true;
 }
 
@@ -185,15 +219,86 @@ void handle_input(chip8_t* chip8){
     }
 }
 
-void emulate_instruction(chip8_t*chip8){
+void emulate_instruction(chip8_t*chip8, config_t*config){
     //get the next opcode from RAM 
     //RAM is an array of 8 bits
     //read the first 8 bits, left shift by 8 then OR with next 8 bits
     chip8->instruction.opcode=chip8->ram[chip8->PC]<<8 | chip8->ram[chip8->PC+1];
     //each instruction is 2 bytes so increment the program counter by 2
     chip8->PC+=2;
+    chip8->instruction.NNN=chip8->instruction.opcode&0xFFF;
+    chip8->instruction.NN=chip8->instruction.opcode&0xFF;
+    chip8->instruction.N=chip8->instruction.opcode&0xF;
+    chip8->instruction.X=(chip8->instruction.opcode>>8)&0xF;
+    chip8->instruction.Y=(chip8->instruction.opcode>>4)&0xF;
     if(chip8->instruction.opcode==0x0000){
         chip8->state=QUIT;
+    }
+    // printf("PC is at %04X\n",chip8->PC-2); //debug
+    switch ((chip8->instruction.opcode>>12)&0xF) //First digit
+    {
+    case 0x0:
+        if(chip8->instruction.NN==0xE0){
+            //clear screen - 0x00E0
+            memset(&chip8->display[0],0,sizeof(chip8->display));
+        }
+        else if(chip8->instruction.NN==0xEE){
+            //return from subroutine - 0x00EE
+            //come back to address stored at top of stack
+            chip8->PC=*--chip8->SP;
+        }else{printf("Unimplemented ");}
+        break;
+    case 0x1:
+        //Jump to NNN - 0x1NNN
+        //Program counter is set to NNN 
+        chip8->PC=chip8->instruction.NNN;
+        break;
+    case 0x2:
+        //Call subroutine at NNN - 0x2NNN
+        *chip8->SP++=chip8->PC; //push current address to stack and increment stack pointer
+        chip8->PC=chip8->instruction.NNN; //move PC to NNN
+        break;
+    case 0xA:
+        //Set Index Register to NNN - 0xANNN
+        chip8->I=chip8->instruction.NNN;
+        break;
+    case 0x6:
+        //Set Data Register VX to NN - 0x6XNN
+        chip8->V[chip8->instruction.X]=chip8->instruction.NN;
+        break;
+    case 0x7:
+        // Add NN to VX - 0x7XNN
+        chip8->V[chip8->instruction.X]+=chip8->instruction.NN;
+        break;
+    case 0xD:{
+        //Draw Sprite at (X,Y) of height N from memory address I - 0xDXYN
+        //To draw we XOR display matrix with the sprite matrix
+        //VF is set if a set display pixel switches OFF
+        //first, we need wrap the coordinates around the screen
+        uint8_t X_coord=chip8->V[chip8->instruction.X] % config->window_width;
+        uint8_t Y_coord=chip8->V[chip8->instruction.Y]% config->window_height;
+        chip8->V[0xF] = 0;
+        //then iterate over N rows of the sprite
+        for(int i=0;i<chip8->instruction.N;i++){
+            //8 bit sprite data 
+            const uint8_t sprite_bin = chip8->ram[chip8->I+i];
+            for(int j=7;j>=0;j--){
+                uint8_t target_X=X_coord+7-j;
+                bool *pixel=&chip8->display[(Y_coord+i)*config->window_width+target_X];
+                //if display pixel is on and the sprite bit is on then VF is set to 1
+                if(*pixel&&(sprite_bin&(1<<j))){
+                    chip8->V[0xF]=1;
+                }
+                //xor display pixel with current sprite bit
+                *pixel ^= (bool)(sprite_bin&(1<<j));
+                if(target_X+1>=config->window_width)break;
+            }
+            if(Y_coord+i+1>=config->window_height)break;
+        }
+        break;}
+    default:
+        printf("Unimplemented ");
+        break;
     }
 }
 
@@ -211,7 +316,7 @@ int main(int argc,char**argv){
         exit(EXIT_FAILURE);
     }
     //initial screen clear
-    clear_screen(&sdl,config);
+    clear_screen(&sdl,&config);
     const char* rom_name=argv[1];
     //initialise chip8 
     if(!init_chip8(&chip8,rom_name)){
@@ -223,11 +328,11 @@ int main(int argc,char**argv){
         //pause emulation
         if(chip8.state==PAUSED){continue;}
         //emulate instructions
-        emulate_instruction(&chip8);    
+        emulate_instruction(&chip8,&config);    
         printf("%04X\n",chip8.instruction.opcode);
         SDL_Delay(16);
-        clear_screen(&sdl,config);
-        update_screen(&sdl);
+        clear_screen(&sdl,&config);
+        update_screen(&sdl,&chip8,&config);
     }
 
     sdl_cleanup(&sdl);
