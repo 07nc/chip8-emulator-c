@@ -258,9 +258,26 @@ void emulate_instruction(chip8_t*chip8, config_t*config){
         *chip8->SP++=chip8->PC; //push current address to stack and increment stack pointer
         chip8->PC=chip8->instruction.NNN; //move PC to NNN
         break;
-    case 0xA:
-        //Set Index Register to NNN - 0xANNN
-        chip8->I=chip8->instruction.NNN;
+    case 0x3:
+        //Skips the next instruction if VX equals NN - 0x3XNN
+        if(chip8->V[chip8->instruction.X]==chip8->instruction.NN){
+            chip8->PC+=2; 
+        }
+        break;
+    case 0x4:
+        //Skips the next instruction if VX does not equal NN - 0x4XNN
+        if(chip8->V[chip8->instruction.X]!=chip8->instruction.NN){
+            chip8->PC+=2; 
+        }
+        break;
+    case 0x5:
+        if(chip8->instruction.N!=0){
+            break;
+        }
+        //Skips the next instruction if VX equals VY - 0x5XY0
+        if(chip8->V[chip8->instruction.X]==chip8->V[chip8->instruction.Y]){
+            chip8->PC+=2; 
+        }
         break;
     case 0x6:
         //Set Data Register VX to NN - 0x6XNN
@@ -269,6 +286,81 @@ void emulate_instruction(chip8_t*chip8, config_t*config){
     case 0x7:
         // Add NN to VX - 0x7XNN
         chip8->V[chip8->instruction.X]+=chip8->instruction.NN;
+        break;
+    case 0x8:
+        if(chip8->instruction.N==0){
+            //Sets VX to value of VY - 0x8XY0
+            chip8->V[chip8->instruction.X]=chip8->V[chip8->instruction.Y];}
+        else if(chip8->instruction.N==1){
+            //Sets VX to VX | VY - 0x8XY1
+            chip8->V[chip8->instruction.X]|=chip8->V[chip8->instruction.Y];
+        }
+        else if(chip8->instruction.N==2){
+            //Sets VX to VX & VY - 0x8XY2
+            chip8->V[chip8->instruction.X]&=chip8->V[chip8->instruction.Y];
+        }
+        else if(chip8->instruction.N==3){
+            //Sets VX to VX xor VY - 0x8XY3
+            chip8->V[chip8->instruction.X]^=chip8->V[chip8->instruction.Y];
+        }
+        else if(chip8->instruction.N==4){
+            //Adds VY to VX - 0x8XY4
+            uint16_t temp= chip8->V[chip8->instruction.X]+chip8->V[chip8->instruction.Y];
+            //VF is set to 1 if overflow, and to 0 if there's no overflow
+            chip8->V[chip8->instruction.X]+=chip8->V[chip8->instruction.Y];
+            if(temp>255){
+                chip8->V[0xF]=1;
+            }
+            else{
+                chip8->V[0xF]=-0;
+            }
+        }
+        else if(chip8->instruction.N==5){
+            //Subtracts VY from VX - 0x8XY5
+            //VF is set to 1 if VX >= VY and 0 if not
+            chip8->V[chip8->instruction.X]-=chip8->V[chip8->instruction.Y];
+            if( chip8->V[chip8->instruction.X]>=chip8->V[chip8->instruction.Y]){
+                 chip8->V[0xF]=1;
+            }
+            else{
+                chip8->V[0xF]=-0;
+            }            
+        }
+        else if(chip8->instruction.N==6){
+            uint8_t temp=chip8->V[chip8->instruction.X];
+            //Right Shifts VX by 1 - 0x8XY6
+            chip8->V[chip8->instruction.X]>>=1;
+            //VF is set to LSB of VX prior to shifting
+            chip8->V[0xF]=(temp&1);
+        }
+         else if(chip8->instruction.N==7){
+            //Sets VX to VY-VX - 0x8XY7
+            //VF set to 1 if VY >= VX
+            chip8->V[chip8->instruction.X]=chip8->V[chip8->instruction.Y]-chip8->V[chip8->instruction.X];
+            if( chip8->V[chip8->instruction.Y]>=chip8->V[chip8->instruction.X]){
+                 chip8->V[0xF]=1;
+            }
+            else{
+                chip8->V[0xF]=-0;
+            }            
+        }       
+        else if(chip8->instruction.N==0xE){
+            uint8_t temp=chip8->V[chip8->instruction.X];
+            //Left Shifts VX by 1 - 0x8XYE
+            chip8->V[chip8->instruction.X]<<=1;
+            //If MSB of VX prior to shifting is set, VX=1, else VX=0
+            chip8->V[0xF]=(temp>>7)&1;
+        }  
+        break;
+    case 0x9:
+        //Skips the next instruction if VX does not equal VY - 0x9XY0
+        if(chip8->V[chip8->instruction.X]!=chip8->V[chip8->instruction.Y]){
+            chip8->PC+=2;
+        }
+        break;
+    case 0xA:
+        //Set Index Register to NNN - 0xANNN
+        chip8->I=chip8->instruction.NNN;
         break;
     case 0xD:{
         //Draw Sprite at (X,Y) of height N from memory address I - 0xDXYN
